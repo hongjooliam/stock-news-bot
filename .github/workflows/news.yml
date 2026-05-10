@@ -1,0 +1,47 @@
+name: News Scraper
+
+on:
+  schedule:
+    # 20분마다 (UTC 기준이지만 cron 자체는 인터벌이라 시간대 무관)
+    # 무료 GitHub Actions cron 은 5~30분 지연 가능 — 정확성보다는 "주기"로 이해
+    - cron: "*/20 * * * *"
+  workflow_dispatch: {} # GitHub UI 에서 수동 실행
+
+# 동시에 두 번 도는 일 방지 (commit 충돌 방지)
+concurrency:
+  group: news-scraper
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # seen.json commit & push 권한
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scraper.py
+
+      - name: Commit seen.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen.json
+          if git diff --staged --quiet; then
+            echo "no changes to seen.json"
+          else
+            git commit -m "update seen.json [skip ci]"
+            git push
+          fi
