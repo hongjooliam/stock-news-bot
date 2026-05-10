@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import urllib.parse
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import feedparser
@@ -23,6 +24,7 @@ MAX_SEEN = 2000             # seen.json 에 보관할 최대 ID 개수
 SEND_DELAY_SEC = 0.6        # 텔레그램 rate limit 회피용 메시지 간격
 PER_KEYWORD_LIMIT = 30      # 키워드당 한 번에 처리할 최대 기사 수
 REQUEST_TIMEOUT = 30
+LOOKBACK_HOURS = 2          # 발행 시각 기준 이 시간 안의 기사만 후보 (cron 지연 흡수용)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -58,11 +60,22 @@ def save_seen(seen_list: list[str]) -> None:
     )
 
 
+def is_recent(entry) -> bool:
+    parsed = entry.get("published_parsed")
+    if not parsed:
+        # published 시각이 없으면 ID dedup 에 맡김 (안전한 통과)
+        return True
+    published = datetime(*parsed[:6], tzinfo=timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
+    return published >= cutoff
+
+
 def fetch_news(keyword: str):
     q = urllib.parse.quote(keyword)
     url = f"https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
     feed = feedparser.parse(url)
-    return feed.entries[:PER_KEYWORD_LIMIT]
+    recent = [e for e in feed.entries if is_recent(e)]
+    return recent[:PER_KEYWORD_LIMIT]
 
 
 def send_telegram(text: str) -> None:
